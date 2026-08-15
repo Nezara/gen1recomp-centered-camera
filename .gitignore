@@ -1,0 +1,5 @@
+# diagnostics the mod writes into the save directory
+centered_camera.log
+
+# build output
+*.zip
