@@ -39,15 +39,69 @@
 
 local mod = ...
 
-local LOG = "centered_camera.log"
+-- gen1recomp's mod sandbox no longer exposes love.filesystem at all (the
+-- engine author: mods that touch it stop loading outright in the next
+-- release, with no permission that reopens it). The supported replacement,
+-- mod.storage, needs a live game with a resolved playthrough -- which does
+-- not exist yet at entry-chunk time, where this mod's own first log line
+-- fires -- so log() buffers in memory and flushes opportunistically once a
+-- game shows up. Read the log at
+-- <savedir>/mod_storage/<version>/<playthroughId>/centered_camera/log.bin.
+local LOG_KEY = "log"
+local LOG_MAX_BYTES = 32 * 1024
+
+local liveGame
+local logBuf, logBytes, logLoaded = {}, 0, false
+
+-- Declared as a local ahead of log() so log() can close over it as an
+-- upvalue; assigned further down. A Lua local must exist before the code
+-- that NAMES it, not merely before that code runs.
+local flushLog
 
 local function log(fmt, ...)
   local ok, msg = pcall(string.format, fmt, ...)
   if not ok then msg = tostring(fmt) end
   -- no `os` in the mod sandbox; love.timer is the available clock
-  pcall(love.filesystem.append, LOG,
-        string.format("[%8.2f] %s\n", love.timer.getTime(), msg))
+  local line = string.format("[%8.2f] %s\n", love.timer.getTime(), msg)
+  logBuf[#logBuf + 1] = line
+  logBytes = logBytes + #line
+  -- Trim in memory too, in case a game never shows up in this run (a boot
+  -- that never gets past the launcher) so a long session still can't grow
+  -- without bound.
+  while logBytes > LOG_MAX_BYTES * 2 and #logBuf > 1 do
+    logBytes = logBytes - #logBuf[1]
+    table.remove(logBuf, 1)
+  end
+  flushLog()
 end
+
+flushLog = function()
+  if not liveGame then return end
+  local okCtx, ctx = pcall(function() return mod.storage:context(liveGame) end)
+  if not (okCtx and ctx) then return end -- no playthrough resolved yet
+  if not logLoaded then
+    -- carry the previous session's tail across so the log stays continuous
+    local okPrev, prev = pcall(function()
+      return mod.storage:readBytes(liveGame, LOG_KEY)
+    end)
+    logLoaded = true
+    if okPrev and type(prev) == "string" and prev ~= "" then
+      table.insert(logBuf, 1, prev)
+      logBytes = logBytes + #prev
+    end
+  end
+  local body = table.concat(logBuf)
+  if #body > LOG_MAX_BYTES then body = body:sub(-LOG_MAX_BYTES) end
+  local ok = pcall(function()
+    return mod.storage:writeBytes(liveGame, LOG_KEY, body)
+  end)
+  if ok then logBuf, logBytes = { body }, #body end
+end
+
+mod.events:on("game.ready", function(ev)
+  liveGame = (ev and ev.game) or liveGame
+  flushLog()
+end)
 
 log("entry: main.lua start")
 

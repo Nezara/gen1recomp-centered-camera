@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1
+
+- gen1recomp's mod sandbox stopped allowing `love.filesystem` (the debug log
+  was the only use). Rewritten onto `mod.storage`, which needs a live game to
+  resolve, so the logger now buffers in memory until one exists. No gameplay
+  change -- this only affects where the diagnostic log file lives.
+
 ## 1.0.0
 
 - Initial release. Wraps `Camera.follow` to move the camera 8px left, putting
