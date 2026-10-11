@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0
+
+- Gen 2 and Gen 3 support. The manifest now declares
+  `"games": ["gen1", "gen2", "gen3"]`. Before this, the loader only ran the mod
+  on Gen 1.
+- Gen 2 (Gold/Silver/Crystal): the existing `Camera.follow` patch applies
+  as-is, because the Gen 2 overworld uses the same camera and screen size.
+- Gen 3 (FRLG/RSE): the GBA field is already truly centred, so nothing is
+  corrected. A new `FieldView.draw` wrapper applies `Y NUDGE` and the new
+  `GBA X NUDGE` option as a taste bias. The wrapper preserves the camera
+  pans that scripts set.
+- The mod checks which generation is booted and patches only the renderer
+  that game uses.
+
 ## 1.0.1
 
 - gen1recomp's mod sandbox stopped allowing `love.filesystem` (the debug log

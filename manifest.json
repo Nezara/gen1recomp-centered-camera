@@ -1,13 +1,18 @@
 {
   "id": "centered_camera",
   "name": "Centered Camera",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "github": "Nezara/gen1recomp-centered-camera",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
   "category": "VISUAL",
   "game_version": ">=0.0.0-0 <2.0.0",
+  "games": [
+    "gen1",
+    "gen2",
+    "gen3"
+  ],
   "priority": 100,
   "dependencies": [],
   "optional_dependencies": [],
@@ -16,5 +21,5 @@
     "engine_internals"
   ],
   "affects_link": false,
-  "description": "Centres the player horizontally. The Game Boy screen is 10 tiles wide -- an even count, with no middle column -- so the ROM parks the player in column 4, which is 8 pixels left of true centre. This nudges the camera 8 pixels left so the player's tile straddles the centre line exactly, and it holds at any zoom, tilt or phone-fill view size because the offset rides the same follow the engine already scales. The vertical framing is left alone: 9 rows is odd, so row 4 really is the middle row and the ROM was already true there. X CENTRE sets the correction (8 = true centre, 0 = vanilla framing). Y NUDGE is an optional extra, off by default -- it fixes nothing, it just biases the view up or down if you want that."
+  "description": "Centres the player horizontally on Red/Blue/Yellow and Gold/Silver/Crystal. The Game Boy screen is 10 tiles wide -- an even count, with no middle column -- so the ROM parks the player in column 4, 8 pixels left of true centre. This nudges the camera 8 pixels left so the player's tile straddles the centre line exactly, at any zoom, tilt or phone-fill view size. Vertical framing is left alone: 9 rows is odd, so the ROM was already true there. FireRed/LeafGreen/Ruby/Sapphire/Emerald are already centred on both axes, so nothing is corrected there; the nudges still work as a taste bias. X CENTRE sets the GB correction (8 = true centre, 0 = vanilla). Y NUDGE biases the view up or down on every game. GBA X NUDGE biases Gen 3 left or right."
 }

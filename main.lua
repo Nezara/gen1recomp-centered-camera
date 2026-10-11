@@ -25,8 +25,9 @@
 -- Patching Camera.follow rather than the overworld's call site is deliberate:
 -- Camera instances are `setmetatable({}, Camera)` with `Camera.__index =
 -- Camera`, so one patch reaches every camera ever made, before or after, and
--- that includes Gold's world (src/world/gen2/World.lua uses the same module
--- and the same 160x144 framing).
+-- that includes Gen 2's world (src/world/gen2/World.lua uses the same module
+-- and the same 160x144 framing).  Gen 3 has its own renderer and is already
+-- centred; see the Gen 3 section at the bottom.
 --
 -- Everything else in the overworld draws relative to cam.x/cam.y -- tiles,
 -- border fill, connected-map strips, NPCs, ghosts, emotes, palette zones --
@@ -107,10 +108,10 @@ log("entry: main.lua start")
 
 -- ---------------------------------------------------------------- options --
 
-local DEFAULTS = { enabled = true, shift_x = 8, shift_y = 0 }
+local DEFAULTS = { enabled = true, shift_x = 8, shift_y = 0, gba_x = 0 }
 
 -- live values, refreshed out of the options store rather than read per frame
-local opts = { enabled = true, shift_x = 8, shift_y = 0 }
+local opts = { enabled = true, shift_x = 8, shift_y = 0, gba_x = 0 }
 
 -- ONE define call: mod.options:define REPLACES the whole set every time it is
 -- called, it does not merge.
@@ -125,6 +126,11 @@ mod.options:define({
   -- this corrects nothing -- it is purely a taste bias up or down.
   { key = "shift_y", label = "Y NUDGE", type = "number",
     default = DEFAULTS.shift_y, min = -16, max = 16, step = 1 },
+  -- Gen 3 only. The GBA field is already truly centred on both axes, so
+  -- there is nothing to correct and this defaults to 0 -- it is a taste
+  -- bias like Y NUDGE. Positive = the player sits further right.
+  { key = "gba_x", label = "GBA X NUDGE", type = "number",
+    default = DEFAULTS.gba_x, min = -16, max = 16, step = 1 },
 })
 
 local function number(value, fallback)
@@ -139,13 +145,15 @@ local function refresh()
     if opts.enabled == nil then opts.enabled = DEFAULTS.enabled end
     opts.shift_x = number(mod.options:get("shift_x"), DEFAULTS.shift_x)
     opts.shift_y = number(mod.options:get("shift_y"), DEFAULTS.shift_y)
+    opts.gba_x = number(mod.options:get("gba_x"), DEFAULTS.gba_x)
   end)
   if not ok then
     log("options refresh failed: %s", tostring(err))
     return
   end
-  log("options: enabled=%s shift_x=%s shift_y=%s",
-      tostring(opts.enabled), tostring(opts.shift_x), tostring(opts.shift_y))
+  log("options: enabled=%s shift_x=%s shift_y=%s gba_x=%s",
+      tostring(opts.enabled), tostring(opts.shift_x), tostring(opts.shift_y),
+      tostring(opts.gba_x))
 end
 
 -- Read once now, then again at each point the stored values could have landed
@@ -157,24 +165,109 @@ mod.events:on("game.ready", function() refresh() end)
 
 -- ------------------------------------------------------------- the patch --
 
-local ok, Camera = pcall(require, "src.render.Camera")
-
-if not ok or type(Camera) ~= "table" or type(Camera.follow) ~= "function" then
-  log("FAILED: could not reach src.render.Camera (%s) -- mod is inert",
-      tostring(Camera))
-  return
-end
-
-local baseFollow = Camera.follow
-
-function Camera:follow(px, py, viewW, viewH)
-  baseFollow(self, px, py, viewW, viewH)
-  if opts.enabled then
-    -- left is negative x: a smaller camera x draws the world further right,
-    -- carrying the player onto the centre line
-    self.x = self.x - opts.shift_x
-    self.y = self.y - opts.shift_y
+-- Which generation is booted decides which renderer gets patched. The loader
+-- gates mods per game, so by the time this chunk runs the version is set.
+local generation = 1
+do
+  local okGV, GameVersion = pcall(require, "src.core.GameVersion")
+  if okGV and type(GameVersion) == "table" and GameVersion.generation then
+    local okGen, gen = pcall(GameVersion.generation)
+    if okGen and tonumber(gen) then generation = tonumber(gen) end
   end
 end
+log("booted generation %d", generation)
 
-log("patched Camera.follow -- main.lua done")
+-- Gen 1 and Gen 2 (Red/Blue/Yellow, Gold/Silver/Crystal) -------------------
+--
+-- Both overworlds -- src/world/OverworldController.lua and
+-- src/world/gen2/World.lua -- build their camera from src.render.Camera and
+-- frame the same 160x144 screen, so they share the off-by-8 and one patch
+-- fixes both.
+
+local function patchGameBoy()
+  local ok, Camera = pcall(require, "src.render.Camera")
+  if not ok or type(Camera) ~= "table" or type(Camera.follow) ~= "function" then
+    log("FAILED: could not reach src.render.Camera (%s) -- GB patch inert",
+        tostring(Camera))
+    return
+  end
+
+  local baseFollow = Camera.follow
+
+  function Camera:follow(px, py, viewW, viewH)
+    baseFollow(self, px, py, viewW, viewH)
+    if opts.enabled then
+      -- left is negative x: a smaller camera x draws the world further right,
+      -- carrying the player onto the centre line
+      self.x = self.x - opts.shift_x
+      self.y = self.y - opts.shift_y
+    end
+  end
+
+  log("patched Camera.follow")
+end
+
+-- Gen 3 (FireRed/LeafGreen, Ruby/Sapphire/Emerald) --------------------------
+--
+-- The GBA field does not use src.render.Camera. src/core/game3/field_view.lua
+-- frames it directly:
+--
+--   camX = floor(px + CELL / 2 - canvasW / 2)
+--   camY = floor(py + CELL / 2 - canvasH / 2)
+--
+-- i.e. the player's 16x16 cell centre lands exactly on the canvas centre on
+-- BOTH axes (240x160 is 15 cells wide -- odd -- and the cart's
+-- PLAYER_SCREEN_Y of 72 already splits the even 10 rows). There is no
+-- off-by-8 to correct, so X CENTRE does nothing here and the player stays
+-- where the cart put them. The nudges still apply, as the same taste bias.
+--
+-- The only knob into that framing is FieldView.cameraPanX/Y, which cart
+-- scripts own (camera pans, elevator shake, Emerald's camera object). So the
+-- nudge is added for the duration of one draw and the scripts' value put
+-- back afterwards -- the same seam src/core/game3/camera_object.lua uses.
+-- Pan is camera-space: +pan moves the world left, so the sign is flipped to
+-- keep "positive = player moves right / down" consistent with the GB games.
+
+local gbaPatched = false
+
+local function patchGba()
+  if gbaPatched then return true end
+  local ok, FieldView = pcall(require, "src.core.game3.field_view")
+  if not ok or type(FieldView) ~= "table" or type(FieldView.draw) ~= "function" then
+    log("could not reach src.core.game3.field_view (%s) -- will retry",
+        tostring(FieldView))
+    return false
+  end
+
+  local baseDraw = FieldView.draw
+
+  FieldView.draw = function(game, canvasW, canvasH, drawOpts)
+    local dx = opts.enabled and -opts.gba_x or 0
+    local dy = opts.enabled and -opts.shift_y or 0
+    if dx == 0 and dy == 0 then
+      return baseDraw(game, canvasW, canvasH, drawOpts)
+    end
+    local bx = FieldView.cameraPanX or 0
+    local by = FieldView.cameraPanY or 0
+    FieldView.cameraPanX, FieldView.cameraPanY = bx + dx, by + dy
+    local okDraw, err = pcall(baseDraw, game, canvasW, canvasH, drawOpts)
+    -- only restore if nothing inside the draw re-set the pan itself
+    if FieldView.cameraPanX == bx + dx then FieldView.cameraPanX = bx end
+    if FieldView.cameraPanY == by + dy then FieldView.cameraPanY = by end
+    if not okDraw then error(err, 0) end
+  end
+
+  gbaPatched = true
+  log("patched FieldView.draw")
+  return true
+end
+
+if generation >= 3 then
+  if not patchGba() then
+    mod.events:on("game.ready", function() patchGba() end)
+  end
+else
+  patchGameBoy()
+end
+
+log("main.lua done")
